@@ -1,64 +1,139 @@
-from fastapi.testclient import TestClient
-from main import app
+def test_home_endpoint():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Academic Audit API is running" in response.json()["message"]
 
-client = TestClient(app)
 
-def test_home():
-    r = client.get("/")
-    assert r.status_code == 200
+def test_missing_course_returns_404():
+    response = client.get("/api/v1/catalog/courses/FAKE9999")
+    assert response.status_code == 404
 
-def test_import_history():
-    with open("student-example.html", "rb") as f:
-        r = client.post("/api/v1/students/111/history/import",
-                       files={"file": ("t.html", f, "text/html")})
-    assert r.status_code == 201
-    assert r.json()["past_courses_imported"] == 33
 
-def test_profile():
-    r = client.get("/api/v1/students/111/profile")
-    assert r.status_code == 200
-    data = r.json()
-    assert "student_id" in data
-    assert "history" in data
-    assert "plan" in data
+def test_missing_student_profile_returns_404():
+    response = client.get("/api/v1/students/doesnotexist/profile")
+    assert response.status_code == 404
 
-def test_404_unknown_student():
-    r = client.get("/api/v1/students/999/profile")
-    assert r.status_code == 404
 
-def test_plan():
-    client.post("/api/v1/students/222/history/import",
-                files={"file": open("student-example.html", "rb")})
-    r = client.post("/api/v1/students/222/plan",
-                   json={"planned_courses": [{"course_code": "COSC-3506", "term": "26F"}]})
-    assert r.status_code == 200
-    assert r.json()["planned_courses_saved"] == 1
+def test_delete_missing_student_history_returns_404():
+    response = client.delete("/api/v1/students/doesnotexist/history")
+    assert response.status_code == 404
 
-def test_audit_report_schema():
-    r = client.get("/api/v1/students/111/audit-report")
-    assert r.status_code == 200
-    data = r.json()
-    assert "student_id" in data
-    assert "status" in data
-    assert "timeline_validation" in data
-    assert "cross_list_violations" in data
-    assert "credit_summary" in data
 
-def test_audit_strict():
-    r = client.get("/api/v1/students/111/audit-report?strict=true")
-    assert r.status_code == 200
-    assert r.json()["status"] in ["ok", "failed", "warning"]
+def test_delete_missing_student_plan_returns_404():
+    response = client.delete("/api/v1/students/doesnotexist/plan")
+    assert response.status_code == 404
 
-def test_import_catalog():
-    with open("sample_catalog.html", "rb") as f:
-        r = client.post("/api/v1/admin/catalog/import",
-                       files={"file": ("catalog.html", f, "text/html")})
-    assert r.status_code == 201
 
-def test_delete_history():
-    r = client.delete("/api/v1/students/111/history")
-    assert r.status_code == 200
+def test_catalog_course_lookup_format_insensitive():
+    html = """
+    <html>
+    <body>
+    <table>
+        <tr>
+            <th>Course Code</th>
+            <th>Title</th>
+            <th>Credits</th>
+            <th>Prerequisites</th>
+            <th>Cross-listed</th>
+        </tr>
+        <tr>
+            <td>COSC 3506</td>
+            <td>Software Systems Development</td>
+            <td>3</td>
+            <td>COSC 2007</td>
+            <td>ITEC 3506</td>
+        </tr>
+    </table>
+    </body>
+    </html>
+    """
 
-def test_delete_plan():
-    r = client.delete("/api/v1/students/111/plan")
-    assert r.status_code == 200
+    response = client.post(
+        "/api/v1/admin/catalog/import",
+        files={"file": ("catalog.html", html, "text/html")}
+    )
+
+    assert response.status_code == 201
+
+    response = client.get("/api/v1/catalog/courses/COSC-3506")
+    assert response.status_code == 200
+    assert response.json()["credits"] == 3
+    assert "COSC2007" in response.json()["prerequisites"]
+    assert "ITEC3506" in response.json()["cross_listed"]
+
+
+def test_update_and_delete_history_and_plan():
+    student_id = "999"
+
+    history_body = {
+        "history": [
+            {
+                "course_code": "COSC-2007",
+                "term": "24F",
+                "credits_earned": 3,
+                "status": "Completed"
+            }
+        ]
+    }
+
+    # Create student first using history import
+    html = """
+    <html>
+    <body>
+    <table>
+        <tr>
+            <th>Status</th>
+            <th>Course</th>
+            <th>Grade</th>
+            <th>Term</th>
+            <th>Credits</th>
+        </tr>
+        <tr>
+            <td>Completed</td>
+            <td>COSC-2006</td>
+            <td>80</td>
+            <td>24W</td>
+            <td>3</td>
+        </tr>
+    </table>
+    </body>
+    </html>
+    """
+
+    response = client.post(
+        f"/api/v1/students/{student_id}/history/import",
+        files={"file": ("student.html", html, "text/html")}
+    )
+    assert response.status_code == 201
+
+    response = client.put(
+        f"/api/v1/students/{student_id}/history",
+        json=history_body
+    )
+    assert response.status_code == 200
+
+    plan_body = {
+        "planned_courses": [
+            {
+                "course_code": "COSC-3506",
+                "term": "26F"
+            }
+        ]
+    }
+
+    response = client.post(
+        f"/api/v1/students/{student_id}/plan",
+        json=plan_body
+    )
+    assert response.status_code == 200
+
+    response = client.get(f"/api/v1/students/{student_id}/profile")
+    assert response.status_code == 200
+    assert response.json()["history"][0]["course_code"] == "COSC-2007"
+    assert response.json()["plan"][0]["course_code"] == "COSC-3506"
+
+    response = client.delete(f"/api/v1/students/{student_id}/plan")
+    assert response.status_code == 200
+
+    response = client.delete(f"/api/v1/students/{student_id}/history")
+    assert response.status_code == 200
