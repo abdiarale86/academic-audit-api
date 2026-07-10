@@ -66,4 +66,66 @@ def test_plan_put():
 
 
 def test_plan_delete():
-    r = client.delete("/api/v1/students/111/plan
+    r = client.delete("/api/v1/students/111/plan")
+    assert r.status_code == 200
+
+
+def test_history_put():
+    r = client.put("/api/v1/students/111/history",
+                   json={"history": [
+                       {"course_code": "COSC-1046", "term": "23F",
+                        "credits_earned": 3, "status": "Completed"}
+                   ]})
+    assert r.status_code == 200
+
+
+def test_history_delete():
+    r = client.delete("/api/v1/students/111/history")
+    assert r.status_code == 200
+
+
+def test_audit_report():
+    with open("student-example.html", "rb") as f:
+        client.post("/api/v1/students/111/history/import",
+                    files={"file": ("t.html", f, "text/html")})
+    r = client.get("/api/v1/students/111/audit-report")
+    assert r.status_code == 200
+    data = r.json()
+    assert "student_id" in data
+    assert "status" in data
+    assert "timeline_validation" in data
+    assert "cross_list_violations" in data
+    assert "credit_summary" in data
+
+
+def test_audit_strict_true():
+    r = client.get("/api/v1/students/111/audit-report?strict=true")
+    assert r.status_code == 200
+    assert r.json()["status"] in ["ok", "failed", "warning"]
+
+
+def test_audit_404():
+    r = client.get("/api/v1/students/999/audit-report")
+    assert r.status_code == 404
+
+
+def test_plan_404():
+    r = client.post("/api/v1/students/999/plan",
+                    json={"planned_courses": []})
+    assert r.status_code == 404
+
+
+def test_history_put_404():
+    r = client.put("/api/v1/students/999/history",
+                   json={"history": []})
+    assert r.status_code == 404
+
+
+def test_history_delete_404():
+    r = client.delete("/api/v1/students/999/history")
+    assert r.status_code == 404
+
+
+def test_plan_delete_404():
+    r = client.delete("/api/v1/students/999/plan")
+    assert r.status_code == 404
